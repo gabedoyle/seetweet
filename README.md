@@ -10,6 +10,8 @@ Components
 
 SeeTweet has a Python side and an R side; tweets are obtained by the Python code seetweetVVV.py (VVV being the current version number) and mapped by the R code seetweetfnsVVV.R.  Samples of R code for various projects is included.
 
+This also requires the "twitter" modeule by Mike Verdone, available at https://pypi.python.org/pypi/twitter (tested using v.1.14.2)
+
 Getting Tweets
 ==============
 
