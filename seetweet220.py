@@ -1,10 +1,8 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-#SeeTweet 2.1.9 adds tweet date/time to the output, with individual columns for day,date,month,year,hour (24),min,sec
-#   times are based on UTC unless Twitter changes this at some point
-#	2.1.9b: corrected location of Grand Rapids, MI & set up to correct other mislocations
-#NOTE THOUGH: I have not had time to properly debug these debuggings. They appear to work but must be checked before v. 2.2
+#SeeTweet 2.2.0 splits the Python script into a library of useful functions (seetweetlib.py) 
+# that hopefully won't need customized, and the main script (seetweet220.py) that should be the locus of customization.
 
 from seetweetlib import *
 
