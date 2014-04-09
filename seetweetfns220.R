@@ -1,33 +1,3 @@
-#Function to generate a map based on mixture of Gaussians centered at each hit
-#Much slower than the KD estimator; use genmapkd() instead
-#Note: the Gaussians are unnormalized & sd is not actually the variance.
-genmap <- function(df,lats,longs,size,sd) {
-	#Defining bin boundaries for map
-	rows <- seq(lats[1],lats[2],size)
-	cols <- seq(longs[1],longs[2],size)
-	
-	#Creating a map-like matrix of all zeros
-	map <- matrix(0,nrow=length(rows),ncol=length(cols))
-	
-	#For each bin individually
-	for (r in seq(1,length(rows))) {
-		print(paste("beginning lat",rows[r]))
-		for (c in seq(1,length(cols))) {
-			temp <- 0
-			#For each hit in the dataframe
-			for (dr in seq(1,nrow(df))) {
-				#Determine distance from SW bin corner to hit LL
-				dist <- sqrt((rows[r]-df$lat[dr])^2+(cols[c]-df$long[dr])^2)
-				#Add Gaussian contribution from this hit to the bin
-				temp <- temp + exp(-dist/sd)
-			}
-			#Set map value to the calculated bin score
-			map[r,c] <- temp
-		}
-	}
-	return(map)	
-}
-
 #Function to generate a map based on 2D Kernel Density Estimation
 # uses Venables & Ripley's MASS library & method
 # returns a map-like matrix
@@ -45,45 +15,6 @@ genmapkd <- function(df,lats,longs,boxsize,band=0) {
 	#kdf <- con2tr(kdf)
 	return(kdf)
 }
-
-#Code to restrict a dataframe to datapoints within a rectangle around the contiguous 48 states
-#Should be improved; currently includes some of Northern MX, Southern Canada, Bahamas
-#restrictUS now covers this more accurately, but also much more slowly
-restrictll <- function(df) {
-	return(with(df,subset(df,lat<49.5 & lat>24.5 & long < -66.5 & long > -125)))
-}
-
-#
-loadusmap <- function(folder='c:/stuff/ucsd/seetweet21/maps',mapname='statesp020') {
-	require(rgdal)		#required for readOGR()
-	require(ggplot2)		#required for fortify()
-	require(plyr)		#required for join()
-	usmapfull <- readOGR(dsn=folder,layer=mapname)
-	usmap <- usmapfull[usmapfull$ORDER_ADM < 49,]
-	usmap <- usmap[usmap$ORDER_ADM > 0,]
-	usmap <- usmap[usmap$AREA > 0.2,]
-	usmap@data$id <- rownames(usmap@data)
-	usmap.points <- fortify(usmap, region="id")
-	usmap.df <- join(usmap.points, usmap@data, by="id")
-	
-	return(usmap.df)
-}
-
-loadusmapfull <- function(folder='c:/stuff/ucsd/seetweet21/maps',mapname='statesp020') {
-	require(rgdal)		#required for readOGR()
-	require(ggplot2)		#required for fortify()
-	require(plyr)		#required for join()
-	usmapfull <- readOGR(dsn=folder,layer=mapname)
-	usmap <- usmapfull[usmapfull$ORDER_ADM < 49,]
-	usmap <- usmap[usmap$ORDER_ADM > 0,]
-	#usmap <- usmap[usmap$AREA > 0.2,]
-	usmap@data$id <- rownames(usmap@data)
-	usmap.points <- fortify(usmap, region="id")
-	usmap.df <- join(usmap.points, usmap@data, by="id")
-	
-	return(usmap.df)
-}
-
 
 #Function to load a dataframe from SeeTweet output
 loaddf <- function(filename,folder='c:/stuff/ucsd/seetweet21/') {
@@ -234,37 +165,50 @@ mapwithbaseline <- function(df1,
 }
 
 
-#Loading a US map and simplifying it (smooth borders & remove all but the core state polygons)
-#No longer seems necessary
-loadandsimplifyusmap <- function(folder='c:/stuff/ucsd/seetweet21/maps',mapname='statesp020') {
-	require(rgdal)		#required for readOGR()
-	require(ggplot2)		#required for fortify()
-	require(plyr)		#required for join()
-	require(shapefiles)	#required for dp()
-	usmapfull <- readOGR(dsn=folder,layer=mapname)
-	usmap <- usmapfull[usmapfull$ORDER_ADM < 49,]
-	usmap <- usmap[usmap$ORDER_ADM > 0,]
-	usmap <- usmap[usmap$AREA > 0.2,]
-	
-	pp <- slot(usmap, "polygons") # take the polygons
-	for (i in seq(1,length(pp))) {
-		print(paste("Simplifying polygon",i,"of",length(pp))) 
-		cf <- coordinates(slot(pp[[i]], "Polygons")[[1]])
-		#print(length(pp[[i]]@Polygons))
-		pf <- list(x=cf[,1], y=cf[,2]) # list of coordinates, as dp() needs a list and not a matrix or dataframe...
-		cf1 <- dp(pf, 0.05) # simplification, with a bandwith of 0.1 decimal degree
-		pp[[i]]@Polygons[[1]]@coords <- cbind(cf1$x,cf1$y)
-		pp[[i]]@Polygons <- list(pp[[i]]@Polygons[[1]])
-		pp[[i]]@plotOrder <- as.integer(1)
+#script to remove data points (tweets or density estimates) that fall outside
+# the contiguous US
+restrictUS <- function(data,map,remove=T) {
+	pts <- SpatialPoints(data[, c('long','lat')], proj4string = map@proj4string)
+	pts.over <- over(pts, map)
+	rownames(pts.over) <- rownames(data)
+	#print(str(pts.over)) # check
+	pts.bad <- rownames(pts.over[is.na(pts.over$STATE), ])
+	#print(data[pts.bad, ]) # how many do we have
+	if (remove) {
+		data.good <- data[!(rownames(data) %in% pts.bad), ]
+		return(data.good)
+	} else {
+		data.bad <- (rownames(data) %in% pts.bad)
+		data$incl <- ifelse(data$incl==1 & !data.bad,1,0)
+		return(data)
 	}
-	usmap@polygons <- pp
-	
-	usmap@data$id <- rownames(usmap@data)
-	usmap.points <- fortify(usmap, region="id")
-	usmap.df <- join(usmap.points, usmap@data, by="id")
-	
-	return(usmap.df)
 }
+
+#prepare tweets for identification as good tweets
+prepincltweets <- function(tweetfile,csvfile,folder) {
+	csv <- loaddf(paste(csvfile,".csv",sep=''),folder)
+	tweets <- read.csv(paste(tweetfile,".tweets",sep=''),header=T,sep=',',fill=T,quote='')
+	incltweets <- csv$tid[csv$incl==1]
+	write.csv(tweets[tweets$tid %in% incltweets,],paste(tweetfile,".incltweets",sep=''))
+	return
+}
+
+#prepare tweets for identification as good tweets
+prepincltweetsfromdf <- function(tweetfile,df) {
+	#csv <- loaddf(paste(csvfile,".csv",sep=''),folder)
+	tweets <- read.csv(paste(tweetfile,".tweets",sep=''),header=T,sep=',',fill=T,quote='')
+	incltweets <- df$tid[df$incl==1]
+	outtweets <- tweets[tweets$tid %in% incltweets,]
+	outtweets <- as.data.frame(lapply(outtweets,factor))
+	write.csv(outtweets,paste(tweetfile,".incltweets.csv",sep=''))
+	return
+}
+
+################################################################################
+#
+# Test functions from the EACL work; ANAE vs. SeeTweet, etc.
+#
+################################################################################
 
 #Hosmer-Lemeshow test (binned predictor proportions)
 regbin <- function(pred,outs,bins=10) {
@@ -334,24 +278,87 @@ bandtest <- function(bw,dft,dfb,dfanae,usmap.df,boxsize=.2,balancedlogplot=T) {
 	print(paste("Diff b/w ANAE levels:",means[1]-means[3]))
 }
 
-#hopefully functional try to set the data to zero outside the US
-#though need to link it to map making & tweet acceptance.
-restrictUS <- function(data,map,remove=T) {
-	pts <- SpatialPoints(data[, c('long','lat')], proj4string = map@proj4string)
-	pts.over <- over(pts, map)
-	rownames(pts.over) <- rownames(data)
-	#print(str(pts.over)) # check
-	pts.bad <- rownames(pts.over[is.na(pts.over$STATE), ])
-	#print(data[pts.bad, ]) # how many do we have
-	if (remove) {
-		data.good <- data[!(rownames(data) %in% pts.bad), ]
-		return(data.good)
-	} else {
-		data.bad <- (rownames(data) %in% pts.bad)
-		data$incl <- ifelse(data$incl==1 & !data.bad,1,0)
-		return(data)
-	}
+################################################################################
+#
+# Administrative functions that you shouldn't need to call directly.
+#
+################################################################################
+
+#function to load and process a map of the US from USGS file
+#removes the various small polygons for islands, etc. to speed plotting
+#this has already been done, and the map is in usmap.RData
+loadusmap <- function(folder='c:/stuff/ucsd/seetweet21/maps',mapname='statesp020') {
+	require(rgdal)		#required for readOGR()
+	require(ggplot2)		#required for fortify()
+	require(plyr)		#required for join()
+	usmapfull <- readOGR(dsn=folder,layer=mapname)
+	usmap <- usmapfull[usmapfull$ORDER_ADM < 49,]
+	usmap <- usmap[usmap$ORDER_ADM > 0,]
+	usmap <- usmap[usmap$AREA > 0.2,]
+	usmap@data$id <- rownames(usmap@data)
+	usmap.points <- fortify(usmap, region="id")
+	usmap.df <- join(usmap.points, usmap@data, by="id")
+	
+	return(usmap.df)
 }
+
+#function to load and process a map of the US from USGS file
+#removes the various small polygons for islands, etc. to speed plotting
+#this has already been done, and the map is in usmap.RData
+loadusmapfull <- function(folder='c:/stuff/ucsd/seetweet21/maps',mapname='statesp020') {
+	require(rgdal)		#required for readOGR()
+	require(ggplot2)		#required for fortify()
+	require(plyr)		#required for join()
+	usmapfull <- readOGR(dsn=folder,layer=mapname)
+	usmap <- usmapfull[usmapfull$ORDER_ADM < 49,]
+	usmap <- usmap[usmap$ORDER_ADM > 0,]
+	#usmap <- usmap[usmap$AREA > 0.2,]
+	usmap@data$id <- rownames(usmap@data)
+	usmap.points <- fortify(usmap, region="id")
+	usmap.df <- join(usmap.points, usmap@data, by="id")
+	
+	return(usmap.df)
+}
+
+#Loading a US map and simplifying it (smooth borders & remove all but the core state polygons)
+#No longer seems necessary
+loadandsimplifyusmap <- function(folder='c:/stuff/ucsd/seetweet21/maps',mapname='statesp020') {
+	require(rgdal)		#required for readOGR()
+	require(ggplot2)		#required for fortify()
+	require(plyr)		#required for join()
+	require(shapefiles)	#required for dp()
+	usmapfull <- readOGR(dsn=folder,layer=mapname)
+	usmap <- usmapfull[usmapfull$ORDER_ADM < 49,]
+	usmap <- usmap[usmap$ORDER_ADM > 0,]
+	usmap <- usmap[usmap$AREA > 0.2,]
+	
+	pp <- slot(usmap, "polygons") # take the polygons
+	for (i in seq(1,length(pp))) {
+		print(paste("Simplifying polygon",i,"of",length(pp))) 
+		cf <- coordinates(slot(pp[[i]], "Polygons")[[1]])
+		#print(length(pp[[i]]@Polygons))
+		pf <- list(x=cf[,1], y=cf[,2]) # list of coordinates, as dp() needs a list and not a matrix or dataframe...
+		cf1 <- dp(pf, 0.05) # simplification, with a bandwith of 0.1 decimal degree
+		pp[[i]]@Polygons[[1]]@coords <- cbind(cf1$x,cf1$y)
+		pp[[i]]@Polygons <- list(pp[[i]]@Polygons[[1]])
+		pp[[i]]@plotOrder <- as.integer(1)
+	}
+	usmap@polygons <- pp
+	
+	usmap@data$id <- rownames(usmap@data)
+	usmap.points <- fortify(usmap, region="id")
+	usmap.df <- join(usmap.points, usmap@data, by="id")
+	
+	return(usmap.df)
+}
+
+#Code to restrict a dataframe to datapoints within a rectangle around the contiguous 48 states
+#Should be improved; currently includes some of Northern MX, Southern Canada, Bahamas
+#restrictUS further restricts the tweets to those within the US map's bounding boxes
+restrictll <- function(df) {
+	return(with(df,subset(df,lat<49.5 & lat>24.5 & long < -66.5 & long > -125)))
+}
+
 
 #removes lake & ocean boundaries from the states in the simplified map usmap.df
 removewater <- function(mapdf) {
@@ -365,23 +372,40 @@ removewater <- function(mapdf) {
 					group!="1522.1" &
 					group!="1261.1"))
 }
-	
-#prepare tweets for identification as good tweets
-prepincltweets <- function(tweetfile,csvfile,folder) {
-	csv <- loaddf(paste(csvfile,".csv",sep=''),folder)
-	tweets <- read.csv(paste(tweetfile,".tweets",sep=''),header=T,sep=',',fill=T,quote='')
-	incltweets <- csv$tid[csv$incl==1]
-	write.csv(tweets[tweets$tid %in% incltweets,],paste(tweetfile,".incltweets",sep=''))
-	return
-}
 
-#prepare tweets for identification as good tweets
-prepincltweetsfromdf <- function(tweetfile,df) {
-	#csv <- loaddf(paste(csvfile,".csv",sep=''),folder)
-	tweets <- read.csv(paste(tweetfile,".tweets",sep=''),header=T,sep=',',fill=T,quote='')
-	incltweets <- df$tid[df$incl==1]
-	outtweets <- tweets[tweets$tid %in% incltweets,]
-	outtweets <- as.data.frame(lapply(outtweets,factor))
-	write.csv(outtweets,paste(tweetfile,".incltweets.csv",sep=''))
-	return
+
+################################################################################
+#
+# Deprecated functions below. Don't use.
+#
+################################################################################
+
+#Function to generate a map based on mixture of Gaussians centered at each hit
+#Much slower than the KD estimator; use genmapkd() instead
+#Note: the Gaussians are unnormalized & sd is not actually the variance.
+genmap <- function(df,lats,longs,size,sd) {
+	#Defining bin boundaries for map
+	rows <- seq(lats[1],lats[2],size)
+	cols <- seq(longs[1],longs[2],size)
+	
+	#Creating a map-like matrix of all zeros
+	map <- matrix(0,nrow=length(rows),ncol=length(cols))
+	
+	#For each bin individually
+	for (r in seq(1,length(rows))) {
+		print(paste("beginning lat",rows[r]))
+		for (c in seq(1,length(cols))) {
+			temp <- 0
+			#For each hit in the dataframe
+			for (dr in seq(1,nrow(df))) {
+				#Determine distance from SW bin corner to hit LL
+				dist <- sqrt((rows[r]-df$lat[dr])^2+(cols[c]-df$long[dr])^2)
+				#Add Gaussian contribution from this hit to the bin
+				temp <- temp + exp(-dist/sd)
+			}
+			#Set map value to the calculated bin score
+			map[r,c] <- temp
+		}
+	}
+	return(map)	
 }
