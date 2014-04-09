@@ -32,4 +32,4 @@ Note this also means that you should *not* run multiple copies of SeeTweet simul
 Mapping Tweets
 ==============
 
-Mapping is performed by the R portion of the code. Description of this code to come.
+Mapping is performed by the R portion of the code, with functions in seetweetfns220.R. A sample run plotting *y'all* usage is performed by sample.R (with data in the sample/ directory). An overview of the R functions is given in R-README.txt.
